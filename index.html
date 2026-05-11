@@ -276,7 +276,7 @@
   function clearForm() {
     document.getElementById('form-name').value = '';
     document.getElementById('form-purpose').value = '';
-    document.getElementById('form-duration').value = '2';
+    document.getElementById('form-duration').value = '0';
     document.getElementById('form-days').value = '0';
   }
 
@@ -379,7 +379,7 @@ body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-s
         <input class="form-input" id="form-name" placeholder="홍길동" />
         <label class="form-label">예상 사용 시간</label>
         <div style="display:flex;gap:8px;margin-bottom:11px;">
-          <input class="form-input" id="form-duration" type="number" min="1" max="24" value="2" placeholder="시간" style="margin-bottom:0;flex:1;" />
+          <input class="form-input" id="form-duration" type="number" min="1" max="24" value="0" placeholder="시간" style="margin-bottom:0;flex:1;" />
           <select class="form-input" id="form-days" style="margin-bottom:0;flex:1;">
             <option value="0">당일</option>
             <option value="1">1일</option>
