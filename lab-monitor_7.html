@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>실험실 장비 모니터</title>
+
+<!-- ✅ 여기에 Firebase 설정을 입력하세요 (설정 가이드 참고) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getDatabase, ref, onValue, set, update, push, remove, serverTimestamp }
+    from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+
+  // ▼▼▼ Firebase 콘솔에서 복사한 값으로 교체하세요 ▼▼▼
+	const firebaseConfig = {
+	  apiKey: "AIzaSyAPwuge7uvHH8fzigUcM3fuXGCG5xTkaj8",
+	  authDomain: "hils-ee53f.firebaseapp.com",
+	  databaseURL: "https://hils-ee53f-default-rtdb.firebaseio.com",
+	  projectId: "hils-ee53f",
+	  storageBucket: "hils-ee53f.firebasestorage.app",
+	  messagingSenderId: "604427329321",
+	  appId: "1:604427329321:web:fed9e6297712fd77756138"
+	};
+
+  // ▲▲▲ 여기까지 교체 ▲▲▲
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // 기본 장비 데이터 (최초 1회만 DB에 저장)
+  const DEFAULT_EQUIPMENT = {
+    "EQ-001": { name:"EBS_LAB_HILS_3", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"EBS_Lab" },
+    "EQ-002": { name:"EBS_LAB_HILS_7", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"EBS_Lab" },
+    "EQ-003": { name:"EBS_LAB_HILS_10", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"EBS_Lab" },
+    "EQ-004": { name:"EBS_LAB_HILS_2", type:"IDB1", status:"available", user:null, started:null, duration:0, purpose:"", location:"EBS_Lab" },
+    "EQ-005": { name:"EBS_LAB_HILS_1", type:"CM1E", status:"available", user:null, started:null, duration:0, purpose:"", location:"EBS_Lab" },
+    "EQ-006": { name:"BRAKE_LAB_HILS_2", type:"IDB1", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-007": { name:"BRAKE_LAB_HILS_3", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-008": { name:"BRAKE_LAB_HILS_5", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-009": { name:"BRAKE_LAB_HILS_6", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-010": { name:"BRAKE_LAB_HILS_8", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-011": { name:"BRAKE_LAB_HILS_9", type:"IDB2", status:"available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" },
+    "EQ-012": { name:"BRAKE_LAB_HILS_*", type:"EMB", status:"Not available", user:null, started:null, duration:0, purpose:"", location:"Brake_Lab" }
+  };
+
+  let allEquipment = {};
+  let selectedId = null;
+  let allQueues = {};
+
+  // DB 초기화 (장비가 없을 때만)
+  const eqRef = ref(db, 'equipment');
+  onValue(eqRef, (snapshot) => {
+    if (!snapshot.exists()) {
+      set(eqRef, DEFAULT_EQUIPMENT);
+    } else {
+      allEquipment = snapshot.val();
+      renderAll();
+    }
+  });
+
+  // 대기열 실시간 구독
+  const queuesRef = ref(db, 'queues');
+  onValue(queuesRef, (snapshot) => {
+    allQueues = snapshot.val() || {};
+    renderAll();
+  });
+
+  function renderAll() {
+    updateStats();
+    renderGrid();
+    if (selectedId) showDetail(selectedId);
+  }
+
+  function updateStats() {
+    const eq = Object.values(allEquipment);
+    document.getElementById('stat-total').textContent = eq.length;
+    document.getElementById('stat-available').textContent = eq.filter(e=>e.status==='available').length;
+    document.getElementById('stat-inuse').textContent = eq.filter(e=>e.status==='in-use').length;
+    const queueCount = Object.values(allQueues).reduce((s, q) => s + (q ? Object.keys(q).length : 0), 0);
+    document.getElementById('stat-queue').textContent = queueCount;
+  }
+
+  const STATUS_MAP = {
+    available:       { label:'사용 가능', color:'#639922', bg:'#EAF3DE', textColor:'#3B6D11', border:'#639922' },
+    'in-use':        { label:'사용 중',   color:'#E24B4A', bg:'#FCEBEB', textColor:'#A32D2D', border:'#E24B4A' },
+    reserved:        { label:'예약됨',    color:'#EF9F27', bg:'#FAEEDA', textColor:'#854F0B', border:'#EF9F27' },
+    maintenance:     { label:'점검 중',   color:'#888780', bg:'#F1EFE8', textColor:'#5F5E5A', border:'#888780' },
+    'Not available': { label:'사용 불가', color:'#888780', bg:'#F1EFE8', textColor:'#5F5E5A', border:'#888780' }
+  };
+
+  const EQ_ICONS = { '현미경':'🔬', '형광현미경':'🔭', '원심분리기':'🌀', 'PCR기기':'🧬', '고압멸균기':'♨️', '분광광도계':'📊', '냉동원심분리기':'❄️', '전기영동기':'⚡' };
+
+  function getIcon(type) { return EQ_ICONS[type] || '🔧'; }
+
+  function formatElapsed(ts) {
+    if (!ts) return '';
+    const m = Math.floor((Date.now() - ts) / 60000);
+    if (m < 1) return '방금 시작';
+    if (m < 60) return m + '분 경과';
+    return Math.floor(m/60) + '시간 ' + (m%60) + '분 경과';
+  }
+
+  function formatRemaining(ts, duration) {
+    if (!ts || !duration) return '';
+    if (duration === -1) return '무기한 사용 중';
+    const elapsed = (Date.now() - ts) / 60000;
+    const rem = Math.max(0, duration - elapsed);
+    if (rem <= 0) return '⚠️ 시간 초과';
+    if (rem >= 1440) return Math.ceil(rem/1440) + '일 남음';
+    if (rem >= 60) return Math.floor(rem/60) + '시간 ' + Math.ceil(rem%60) + '분 남음';
+    return Math.ceil(rem) + '분 남음';
+  }
+
+  function getProgress(ts, duration) {
+    if (!ts || !duration || duration === -1) return 0;
+    return Math.min(100, Math.round(((Date.now()-ts)/60000/duration)*100));
+  }
+
+  function getInitials(name) { return name ? name.slice(0,2) : '??'; }
+
+  function renderGrid() {
+    const grid = document.getElementById('equipment-grid');
+    if (!allEquipment || Object.keys(allEquipment).length === 0) {
+      grid.innerHTML = '<div style="color:#888;font-size:14px;padding:20px;">Firebase 설정을 완료해주세요.</div>';
+      return;
+    }
+    grid.innerHTML = Object.entries(allEquipment).map(([id, eq]) => {
+      const s = STATUS_MAP[eq.status] || STATUS_MAP.available;
+      const queue = allQueues[id] ? Object.values(allQueues[id]) : [];
+      const isSelected = selectedId === id;
+      const pct = getProgress(eq.started, eq.duration);
+      const progressHtml = eq.status === 'in-use' && eq.started
+        ? `<div style="height:3px;background:#f0f0f0;border-radius:2px;margin-top:8px;overflow:hidden;">
+             <div style="height:100%;width:${pct}%;background:${s.color};border-radius:2px;transition:width 1s;"></div>
+           </div>
+           <div style="font-size:11px;color:#888;margin-top:3px;">${formatRemaining(eq.started, eq.duration)}</div>`
+        : '';
+      const userHtml = eq.user
+        ? `<div style="display:flex;align-items:center;gap:6px;margin-top:8px;">
+             <div style="width:22px;height:22px;border-radius:50%;background:${s.bg};color:${s.textColor};font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center;">${getInitials(eq.user)}</div>
+             <span style="font-size:12px;color:#555;">${eq.user}</span>
+           </div>
+           ${eq.started ? `<div style="font-size:11px;color:#999;margin-top:3px;">${formatElapsed(eq.started)}</div>` : ''}`
+        : '';
+      const qBadge = queue.length > 0
+        ? `<span style="position:absolute;top:8px;right:8px;background:#FAEEDA;color:#854F0B;font-size:10px;padding:2px 7px;border-radius:20px;font-weight:600;">대기 ${queue.length}</span>`
+        : '';
+      const isEBS = eq.name && eq.name.includes('EBS_LAB');
+      const cardBg = isEBS ? '#FFFBEA' : '#fff';
+      return `<div onclick="window.selectEq('${id}')" style="
+          background:${cardBg};border-radius:12px;padding:14px;cursor:pointer;position:relative;overflow:hidden;
+          border:${isSelected ? '2px solid #378ADD' : `0.5px solid ${s.border}33`};
+          border-left:3px solid ${s.color};
+          transition:box-shadow 0.15s;
+        " onmouseover="this.style.boxShadow='0 2px 12px rgba(0,0,0,0.08)'" onmouseout="this.style.boxShadow='none'">
+        ${qBadge}
+        <div style="font-size:24px;margin-bottom:8px;">${getIcon(eq.type)}</div>
+        <div style="font-size:14px;font-weight:600;color:#111;margin-bottom:2px;">${eq.name}</div>
+        <div style="font-size:11px;color:#999;margin-bottom:10px;">${eq.location||''}</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;">
+          <span style="font-size:12px;font-weight:500;padding:3px 9px;border-radius:20px;background:${s.bg};color:${s.textColor};">${s.label}</span>
+          <span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;letter-spacing:0.03em;background:${eq.type==='IDB2'?'#E6F1FB':'#F1EFE8'};color:${eq.type==='IDB2'?'#0C447C':'#444441'};">${eq.type}</span>
+        </div>
+        ${userHtml}
+        ${progressHtml}
+      </div>`;
+    }).join('');
+  }
+
+  window.selectEq = function(id) {
+    selectedId = id;
+    showDetail(id);
+    renderGrid();
+    document.getElementById('detail-section').style.display = 'block';
+    document.getElementById('detail-section').scrollIntoView({behavior:'smooth', block:'nearest'});
+  };
+
+  function showDetail(id) {
+    const eq = allEquipment[id];
+    if (!eq) return;
+    const s = STATUS_MAP[eq.status] || STATUS_MAP.available;
+    const queue = allQueues[id] ? Object.values(allQueues[id]) : [];
+
+    document.getElementById('detail-title').textContent = eq.name;
+    document.getElementById('detail-status-badge').textContent = s.label;
+    document.getElementById('detail-status-badge').style.background = s.bg;
+    document.getElementById('detail-status-badge').style.color = s.textColor;
+
+    const rows = [
+      ['장비 ID', id],
+      ['위치', eq.location || '-'],
+      ['유형', eq.type],
+      eq.user ? ['사용자', eq.user] : null,
+      eq.purpose ? ['목적', eq.purpose] : null,
+      eq.started ? ['경과', formatElapsed(eq.started)] : null,
+      eq.started ? ['남은 시간', formatRemaining(eq.started, eq.duration)] : null,
+    ].filter(Boolean);
+
+    document.getElementById('detail-rows').innerHTML = rows.map(([k,v]) =>
+      `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:0.5px solid #f0f0f0;font-size:13px;">
+        <span style="color:#888;">${k}</span><span style="font-weight:500;color:#111;">${v}</span>
+      </div>`
+    ).join('');
+
+    const queueEntries = allQueues[id] ? Object.entries(allQueues[id]) : [];
+    document.getElementById('queue-list').innerHTML = queueEntries.length === 0
+      ? '<div style="font-size:12px;color:#aaa;padding:8px 0;">대기 중인 사용자 없음</div>'
+      : queueEntries.map(([key, q], i) =>
+          `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:0.5px solid #f0f0f0;font-size:13px;">
+            <div style="width:20px;height:20px;border-radius:50%;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#666;flex-shrink:0;">${i+1}</div>
+            <div style="flex:1;"><div style="font-weight:500;color:#111;">${q.name}</div><div style="font-size:11px;color:#aaa;">${q.duration === -1 ? "무기한" : (q.duration >= 1440 ? Math.ceil(q.duration/1440)+"일" : Math.round(q.duration/60)+"시간")} · ${q.purpose}</div></div>
+            <button onclick="window.cancelQueue('${id}','${key}','${q.name}')" style="font-size:11px;padding:3px 8px;border-radius:6px;border:0.5px solid #F09595;background:#FCEBEB;color:#A32D2D;cursor:pointer;flex-shrink:0;">취소</button>
+          </div>`
+        ).join('');
+
+    // 버튼 표시 제어
+    document.getElementById('btn-reserve').style.display = eq.status !== 'maintenance' ? 'block' : 'none';
+    document.getElementById('btn-checkin').style.display = eq.status === 'available' ? 'block' : 'none';
+    document.getElementById('btn-checkout').style.display = eq.status === 'in-use' ? 'block' : 'none';
+  }
+
+  function getDurationMinutes() {
+    const hours = parseInt(document.getElementById('form-duration').value) || 2;
+    const days = parseInt(document.getElementById('form-days').value);
+    if (days === -1) return -1; // 무기한
+    return hours * 60 + days * 24 * 60;
+  }
+
+  window.handleReserve = function() {
+    const name = document.getElementById('form-name').value.trim();
+    const duration = getDurationMinutes();
+    const purpose = document.getElementById('form-purpose').value.trim();
+    if (!name || !purpose) { showToast('이름과 테스트 차종을 입력해주세요.', 'error'); return; }
+    const queueRef = ref(db, `queues/${selectedId}`);
+    push(queueRef, { name, duration, purpose, timestamp: Date.now() });
+    showToast(`${name}님 대기 등록 완료`, 'success');
+    clearForm();
+  };
+
+  window.handleCheckin = function() {
+    const name = document.getElementById('form-name').value.trim();
+    const duration = getDurationMinutes();
+    const purpose = document.getElementById('form-purpose').value.trim();
+    if (!name) { showToast('이름을 입력해주세요.', 'error'); return; }
+    update(ref(db, `equipment/${selectedId}`), {
+      status: 'in-use', user: name, started: Date.now(), duration, purpose: purpose || '-'
+    });
+    showToast(`${name}님 체크인 완료 ✅`, 'success');
+    clearForm();
+  };
+
+  window.cancelQueue = function(eqId, key, name) {
+    if (!confirm(`${name}님의 대기를 취소할까요?`)) return;
+    remove(ref(db, `queues/${eqId}/${key}`));
+    showToast(`${name}님 대기 취소 완료`, 'success');
+  };
+
+  window.handleCheckout = function() {
+    const eq = allEquipment[selectedId];
+    const queue = allQueues[selectedId] ? Object.entries(allQueues[selectedId]) : [];
+    if (queue.length > 0) {
+      const [nextKey, nextUser] = queue[0];
+      update(ref(db, `equipment/${selectedId}`), {
+        status: 'reserved', user: nextUser.name, started: null, duration: nextUser.duration, purpose: nextUser.purpose
+      });
+      remove(ref(db, `queues/${selectedId}/${nextKey}`));
+      showToast(`${eq.user}님 체크아웃 → 다음: ${nextUser.name}`, 'success');
+    } else {
+      update(ref(db, `equipment/${selectedId}`), {
+        status: 'available', user: null, started: null, duration: 0, purpose: ''
+      });
+      showToast(`${eq.user}님 체크아웃 완료`, 'success');
+    }
+  };
+
+  function clearForm() {
+    document.getElementById('form-name').value = '';
+    document.getElementById('form-purpose').value = '';
+    document.getElementById('form-duration').value = '2';
+    document.getElementById('form-days').value = '0';
+  }
+
+  function showToast(msg, type='info') {
+    const t = document.getElementById('toast');
+    const color = type==='success' ? '#639922' : type==='error' ? '#E24B4A' : '#EF9F27';
+    t.innerHTML = `<span style="color:${color};margin-right:6px;">●</span>${msg}`;
+    t.style.opacity = '1';
+    t.style.transform = 'translateY(0)';
+    setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-8px)'; }, 3000);
+  }
+
+  // 시계 + 주기 갱신
+  setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString('ko-KR');
+    if (selectedId) showDetail(selectedId);
+    renderGrid();
+  }, 10000);
+  setInterval(() => {
+    document.getElementById('clock').textContent = new Date().toLocaleTimeString('ko-KR');
+  }, 1000);
+</script>
+
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f7f8fa; color: #111; min-height: 100vh; }
+.wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 60px; }
+.topbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; flex-wrap: wrap; gap: 10px; }
+.title { font-size: 20px; font-weight: 700; color: #111; }
+.subtitle { font-size: 12px; color: #aaa; margin-top: 2px; }
+.live { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #888; }
+.live-dot { width: 7px; height: 7px; border-radius: 50%; background: #639922; animation: pulse 2s infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
+.stats { display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 24px; }
+.stat { background: #fff; border-radius: 10px; padding: 14px 16px; border: 0.5px solid #e8e8e8; }
+.stat-label { font-size: 11px; color: #aaa; margin-bottom: 6px; }
+.stat-val { font-size: 24px; font-weight: 700; }
+.eq-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 24px; }
+.panel { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card { background: #fff; border-radius: 12px; padding: 18px; border: 0.5px solid #e8e8e8; }
+.section-label { font-size: 11px; font-weight: 600; color: #aaa; letter-spacing: 0.06em; text-transform: uppercase; margin-bottom: 12px; }
+.form-label { font-size: 12px; color: #666; margin-bottom: 4px; display: block; }
+.form-input { width: 100%; padding: 9px 11px; font-size: 13px; border: 0.5px solid #ddd; border-radius: 8px; background: #fafafa; color: #111; font-family: inherit; margin-bottom: 11px; }
+.form-input:focus { outline: none; border-color: #378ADD; background: #fff; }
+.btn { width: 100%; padding: 10px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; border: none; transition: opacity 0.15s, transform 0.1s; }
+.btn:hover { opacity: 0.88; }
+.btn:active { transform: scale(0.98); }
+.btn-blue { background: #E6F1FB; color: #185FA5; border: 0.5px solid #85B7EB; }
+.btn-green { background: #EAF3DE; color: #3B6D11; border: 0.5px solid #97C459; margin-top: 8px; }
+.btn-red { background: #FCEBEB; color: #A32D2D; border: 0.5px solid #F09595; margin-top: 8px; }
+.toast { position: fixed; top: 20px; right: 20px; background: #fff; border: 0.5px solid #e8e8e8; border-radius: 10px; padding: 12px 18px; font-size: 13px; box-shadow: 0 4px 20px rgba(0,0,0,0.10); opacity: 0; transform: translateY(-8px); transition: opacity 0.3s, transform 0.3s; z-index: 999; pointer-events: none; max-width: 280px; }
+@media (max-width: 600px) {
+  .stats { grid-template-columns: repeat(2,1fr); }
+  .panel { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="topbar">
+    <div>
+      <div class="title">🔬 실험실 장비 모니터</div>
+      <div class="subtitle">HL_MANDO_B1_LAB</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <div class="live"><div class="live-dot"></div>실시간 동기화</div>
+      <div style="font-size:12px;color:#888;background:#f0f0f0;padding:5px 12px;border-radius:8px;" id="clock">--:--:--</div>
+    </div>
+  </div>
+
+  <div class="stats">
+    <div class="stat"><div class="stat-label">전체 장비</div><div class="stat-val" id="stat-total">-</div></div>
+    <div class="stat"><div class="stat-label">사용 가능</div><div class="stat-val" style="color:#639922;" id="stat-available">-</div></div>
+    <div class="stat"><div class="stat-label">사용 중</div><div class="stat-val" style="color:#E24B4A;" id="stat-inuse">-</div></div>
+    <div class="stat"><div class="stat-label">대기 중</div><div class="stat-val" style="color:#EF9F27;" id="stat-queue">-</div></div>
+  </div>
+
+  <div class="section-label">장비 현황 — 클릭하여 상세/예약</div>
+  <div class="eq-grid" id="equipment-grid">
+    <div style="color:#aaa;font-size:13px;grid-column:1/-1;padding:20px 0;">Firebase 연결 중...</div>
+  </div>
+
+  <div id="detail-section" style="display:none;">
+    <div class="section-label" style="margin-bottom:12px;">상세 정보 및 예약</div>
+    <div class="panel">
+      <div class="card">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+          <div style="font-size:16px;font-weight:700;color:#111;" id="detail-title">-</div>
+          <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;" id="detail-status-badge">-</span>
+        </div>
+        <div id="detail-rows"></div>
+        <div style="margin-top:14px;">
+          <div style="font-size:11px;font-weight:600;color:#aaa;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:6px;">대기 목록</div>
+          <div id="queue-list"></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="section-label">예약 / 체크인</div>
+        <label class="form-label">이름 *</label>
+        <input class="form-input" id="form-name" placeholder="홍길동" />
+        <label class="form-label">예상 사용 시간</label>
+        <div style="display:flex;gap:8px;margin-bottom:11px;">
+          <input class="form-input" id="form-duration" type="number" min="1" max="24" value="2" placeholder="시간" style="margin-bottom:0;flex:1;" />
+          <select class="form-input" id="form-days" style="margin-bottom:0;flex:1;">
+            <option value="0">당일</option>
+            <option value="1">1일</option>
+            <option value="2">2일</option>
+            <option value="3">3일</option>
+            <option value="5">5일</option>
+            <option value="7">1주</option>
+            <option value="14">2주</option>
+            <option value="30">1개월</option>
+            <option value="-1">무기한</option>
+          </select>
+        </div>
+        <label class="form-label">테스트 차종</label>
+        <input class="form-input" id="form-purpose" placeholder="차종 입력 (예: K5, EV6...)" />
+        <button class="btn btn-blue" id="btn-reserve" onclick="handleReserve()">📋 대기 예약 등록</button>
+        <button class="btn btn-green" id="btn-checkin" onclick="handleCheckin()" style="display:none;">✅ 지금 체크인</button>
+        <button class="btn btn-red" id="btn-checkout" onclick="handleCheckout()" style="display:none;">🚪 체크아웃</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+</body>
+</html>
