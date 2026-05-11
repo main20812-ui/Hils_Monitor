@@ -214,9 +214,23 @@
         ).join('');
 
     // 버튼 표시 제어
-    document.getElementById('btn-reserve').style.display = eq.status !== 'maintenance' ? 'block' : 'none';
-    document.getElementById('btn-checkin').style.display = eq.status === 'available' ? 'block' : 'none';
+    document.getElementById('btn-reserve').style.display = (eq.status !== 'maintenance' && eq.status !== 'Not available') ? 'block' : 'none';
+    document.getElementById('btn-checkin').style.display = (eq.status === 'available' || eq.status === 'reserved') ? 'block' : 'none';
     document.getElementById('btn-checkout').style.display = eq.status === 'in-use' ? 'block' : 'none';
+
+    // 예약됨 상태면 예약 정보를 폼에 자동으로 채워넣기
+    if (eq.status === 'reserved' && eq.user) {
+      document.getElementById('form-name').value = eq.user;
+      document.getElementById('form-purpose').value = eq.purpose || '';
+      if (eq.days === -1) {
+        document.getElementById('form-duration').value = 0;
+        document.getElementById('form-days').value = '-1';
+      } else {
+        document.getElementById('form-days').value = eq.days ?? 0;
+        document.getElementById('form-duration').value = eq.hours ?? 0;
+      }
+      window.updateEndTime();
+    }
   }
 
   window.updateEndTime = function() {
@@ -240,31 +254,31 @@
     preview.style.display = 'block';
   };
 
-  function getDurationMinutes() {
-    const hours = parseInt(document.getElementById('form-duration').value) || 2;
+  function getDurationInfo() {
+    const hours = parseInt(document.getElementById('form-duration').value) || 0;
     const days = parseInt(document.getElementById('form-days').value);
-    if (days === -1) return -1; // 무기한
-    return hours * 60 + days * 24 * 60;
+    if (days === -1) return { minutes: -1, hours: 0, days: -1 };
+    return { minutes: hours * 60 + days * 24 * 60, hours, days };
   }
 
   window.handleReserve = function() {
     const name = document.getElementById('form-name').value.trim();
-    const duration = getDurationMinutes();
+    const dInfo = getDurationInfo();
     const purpose = document.getElementById('form-purpose').value.trim();
     if (!name || !purpose) { showToast('이름과 테스트 차종을 입력해주세요.', 'error'); return; }
     const queueRef = ref(db, `queues/${selectedId}`);
-    push(queueRef, { name, duration, purpose, timestamp: Date.now() });
+    push(queueRef, { name, duration: dInfo.minutes, hours: dInfo.hours, days: dInfo.days, purpose, timestamp: Date.now() });
     showToast(`${name}님 대기 등록 완료`, 'success');
     clearForm();
   };
 
   window.handleCheckin = function() {
     const name = document.getElementById('form-name').value.trim();
-    const duration = getDurationMinutes();
+    const dInfo = getDurationInfo();
     const purpose = document.getElementById('form-purpose').value.trim();
     if (!name) { showToast('이름을 입력해주세요.', 'error'); return; }
     update(ref(db, `equipment/${selectedId}`), {
-      status: 'in-use', user: name, started: Date.now(), duration, purpose: purpose || '-'
+      status: 'in-use', user: name, started: Date.now(), duration: dInfo.minutes, hours: dInfo.hours, days: dInfo.days, purpose: purpose || '-'
     });
     showToast(`${name}님 체크인 완료 ✅`, 'success');
     clearForm();
@@ -282,7 +296,7 @@
     if (queue.length > 0) {
       const [nextKey, nextUser] = queue[0];
       update(ref(db, `equipment/${selectedId}`), {
-        status: 'reserved', user: nextUser.name, started: null, duration: nextUser.duration, purpose: nextUser.purpose
+        status: 'reserved', user: nextUser.name, started: null, duration: nextUser.duration, hours: nextUser.hours ?? 0, days: nextUser.days ?? 0, purpose: nextUser.purpose
       });
       remove(ref(db, `queues/${selectedId}/${nextKey}`));
       showToast(`${eq.user}님 체크아웃 → 다음: ${nextUser.name}`, 'success');
@@ -342,6 +356,8 @@
           user: nextUser.name,
           started: null,
           duration: nextUser.duration,
+          hours: nextUser.hours ?? 0,
+          days: nextUser.days ?? 0,
           purpose: nextUser.purpose
         });
         remove(ref(db, `queues/${id}/${nextKey}`));
