@@ -315,11 +315,49 @@
   setInterval(() => {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('ko-KR');
   }, 1000);
-  // 진행바/남은시간 갱신 (30초)
+
+  // 진행바/남은시간 갱신 + 시간초과 자동 전환 (30초)
   setInterval(() => {
     renderGrid();
     if (selectedId) showDetail(selectedId);
+    autoTransferExpired();
   }, 30000);
+
+  // 페이지 열릴 때 즉시 1회 체크 (renderAll 이후 실행되도록 setTimeout)
+  setTimeout(autoTransferExpired, 2000);
+
+  function autoTransferExpired() {
+    if (!allEquipment) return;
+    Object.entries(allEquipment).forEach(([id, eq]) => {
+      if (eq.status !== 'in-use' || !eq.started || eq.duration === -1) return;
+      const elapsed = (Date.now() - eq.started) / 60000;
+      if (elapsed < eq.duration) return;
+
+      // 시간 초과 — 대기열 확인
+      const queue = allQueues[id] ? Object.entries(allQueues[id]) : [];
+      if (queue.length > 0) {
+        const [nextKey, nextUser] = queue[0];
+        update(ref(db, `equipment/${id}`), {
+          status: 'reserved',
+          user: nextUser.name,
+          started: null,
+          duration: nextUser.duration,
+          purpose: nextUser.purpose
+        });
+        remove(ref(db, `queues/${id}/${nextKey}`));
+        showToast(`⏰ ${eq.user}님 시간 초과 → ${nextUser.name}님으로 자동 전환`, 'info');
+      } else {
+        update(ref(db, `equipment/${id}`), {
+          status: 'available',
+          user: null,
+          started: null,
+          duration: 0,
+          purpose: ''
+        });
+        showToast(`⏰ ${eq.user}님 사용 시간 종료 — 장비 반납 처리`, 'info');
+      }
+    });
+  }
 </script>
 
 <style>
