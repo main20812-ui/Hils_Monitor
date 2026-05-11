@@ -52,10 +52,9 @@
   onValue(eqRef, (snapshot) => {
     if (!snapshot.exists()) {
       set(eqRef, DEFAULT_EQUIPMENT);
-    } else {
-      allEquipment = snapshot.val();
-      renderAll();
     }
+    allEquipment = snapshot.val() || DEFAULT_EQUIPMENT;
+    renderAll();
   });
 
   // 대기열 실시간 구독
@@ -290,15 +289,15 @@
     setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(-8px)'; }, 3000);
   }
 
-  // 시계 + 주기 갱신
-  setInterval(() => {
-    document.getElementById('clock').textContent = new Date().toLocaleTimeString('ko-KR');
-    if (selectedId) showDetail(selectedId);
-    renderGrid();
-  }, 10000);
+  // 시계 갱신 (1초)
   setInterval(() => {
     document.getElementById('clock').textContent = new Date().toLocaleTimeString('ko-KR');
   }, 1000);
+  // 진행바/남은시간 갱신 (30초)
+  setInterval(() => {
+    renderGrid();
+    if (selectedId) showDetail(selectedId);
+  }, 30000);
 </script>
 
 <style>
