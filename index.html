@@ -219,6 +219,27 @@
     document.getElementById('btn-checkout').style.display = eq.status === 'in-use' ? 'block' : 'none';
   }
 
+  window.updateEndTime = function() {
+    const hours = parseInt(document.getElementById('form-duration').value) || 0;
+    const days = parseInt(document.getElementById('form-days').value);
+    const preview = document.getElementById('end-time-preview');
+    const text = document.getElementById('end-time-text');
+    if (days === -1) {
+      preview.style.display = 'block';
+      text.textContent = '무기한';
+      return;
+    }
+    const totalMinutes = hours * 60 + days * 24 * 60;
+    if (totalMinutes === 0) {
+      preview.style.display = 'none';
+      return;
+    }
+    const end = new Date(Date.now() + totalMinutes * 60000);
+    const fmt = end.toLocaleString('ko-KR', { month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+    text.textContent = fmt;
+    preview.style.display = 'block';
+  };
+
   function getDurationMinutes() {
     const hours = parseInt(document.getElementById('form-duration').value) || 2;
     const days = parseInt(document.getElementById('form-days').value);
@@ -276,8 +297,9 @@
   function clearForm() {
     document.getElementById('form-name').value = '';
     document.getElementById('form-purpose').value = '';
-    document.getElementById('form-duration').value = '0';
+    document.getElementById('form-duration').value = '2';
     document.getElementById('form-days').value = '0';
+    document.getElementById('end-time-preview').style.display = 'none';
   }
 
   function showToast(msg, type='info') {
@@ -378,9 +400,9 @@ body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-s
         <label class="form-label">이름 *</label>
         <input class="form-input" id="form-name" placeholder="홍길동" />
         <label class="form-label">예상 사용 시간</label>
-        <div style="display:flex;gap:8px;margin-bottom:11px;">
-          <input class="form-input" id="form-duration" type="number" min="1" max="24" value="0" placeholder="시간" style="margin-bottom:0;flex:1;" />
-          <select class="form-input" id="form-days" style="margin-bottom:0;flex:1;">
+        <div style="display:flex;gap:8px;margin-bottom:6px;">
+          <input class="form-input" id="form-duration" type="number" min="0" max="24" value="0" placeholder="시간" style="margin-bottom:0;flex:1;" oninput="updateEndTime()" />
+          <select class="form-input" id="form-days" style="margin-bottom:0;flex:1;" onchange="updateEndTime()">
             <option value="0">당일</option>
             <option value="1">1일</option>
             <option value="2">2일</option>
@@ -391,6 +413,9 @@ body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-s
             <option value="30">1개월</option>
             <option value="-1">무기한</option>
           </select>
+        </div>
+        <div id="end-time-preview" style="font-size:12px;color:#888;margin-bottom:11px;padding:5px 10px;background:#f5f5f5;border-radius:6px;display:none;">
+          📅 사용 종료: <span id="end-time-text" style="font-weight:600;color:#333;"></span>
         </div>
         <label class="form-label">테스트 차종</label>
         <input class="form-input" id="form-purpose" placeholder="차종 입력 (예: K5, EV6...)" />
